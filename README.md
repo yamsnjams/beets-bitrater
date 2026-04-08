@@ -24,6 +24,11 @@ Requires Python 3.10+ and [FFmpeg](https://ffmpeg.org/).
 pip install bitrater
 ```
 
+> **macOS users:** Installation requires [LLVM](https://llvm.org/) to compile `llvmlite` (pulled in by `librosa`). Install it first:
+> ```bash
+> brew install llvm
+> ```
+
 ### With beets plugin
 
 ```bash

@@ -19,6 +19,21 @@ def _setup_logging(verbose: bool = False) -> None:
     )
 
 
+def _resolve_win_drive(path_str: str) -> str | None:
+    """Resolve a Windows mapped drive letter to its UNC path."""
+    if os.name != "nt" or not re.match(r"^[A-Za-z]:\\", path_str):
+        return None
+    import ctypes
+    drive = path_str[:2]  # e.g. "E:"
+    buf = ctypes.create_unicode_buffer(512)
+    length = ctypes.c_ulong(512)
+    result = ctypes.windll.mpr.WNetGetConnectionW(drive, buf, ctypes.byref(length))
+    if result != 0:
+        return None
+    # Replace drive letter with UNC root: E:\foo\bar -> \\server\share\foo\bar
+    return buf.value + path_str[2:]
+
+
 def cmd_analyze(args: argparse.Namespace) -> None:
     """Analyze audio files and print results."""
     from bitrater.analyzer import AudioQualityAnalyzer
@@ -26,6 +41,13 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     analyzer = AudioQualityAnalyzer()
 
     target = Path(args.target).resolve()
+    if not target.is_file() and not target.is_dir():
+        # On Windows, try resolving mapped drive to UNC path
+        unc = _resolve_win_drive(args.target)
+        if unc:
+            target = Path(unc)
+            logger.debug(f"Resolved mapped drive to UNC path: {target}")
+
     if target.is_file():
         files = [target]
     elif target.is_dir():

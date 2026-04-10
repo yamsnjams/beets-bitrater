@@ -34,24 +34,31 @@ def _resolve_win_drive(path_str: str) -> str | None:
     letter = drive[0].upper()
     rest = path_str[2:]  # e.g. "\foo\bar"
 
+    logger.debug(f"Attempting to resolve mapped drive {drive} to UNC path")
+
     # Method 1: WNetGetConnectionW
     try:
         import ctypes
         buf = ctypes.create_unicode_buffer(512)
         length = ctypes.c_ulong(512)
-        if ctypes.windll.mpr.WNetGetConnectionW(drive, buf, ctypes.byref(length)) == 0:
+        rc = ctypes.windll.mpr.WNetGetConnectionW(drive, buf, ctypes.byref(length))
+        if rc == 0:
+            logger.debug(f"WNetGetConnectionW resolved {drive} -> {buf.value}")
             return buf.value + rest
-    except Exception:
-        pass
+        else:
+            logger.debug(f"WNetGetConnectionW failed for {drive} (return code {rc})")
+    except Exception as e:
+        logger.debug(f"WNetGetConnectionW unavailable: {type(e).__name__}: {e}")
 
     # Method 2: Registry (persistent drive mappings)
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Network\{letter}") as key:
             remote_path, _ = winreg.QueryValueEx(key, "RemotePath")
+            logger.debug(f"Registry resolved {drive} -> {remote_path}")
             return remote_path + rest
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Registry lookup failed for {drive}: {type(e).__name__}: {e}")
 
     # Method 3: Parse 'net use' output
     try:
@@ -59,13 +66,17 @@ def _resolve_win_drive(path_str: str) -> str | None:
         output = subprocess.check_output(
             ["net", "use", drive], text=True, stderr=subprocess.DEVNULL
         )
+        logger.debug(f"net use {drive} output:\n{output}")
         for line in output.splitlines():
             if line.strip().lower().startswith("remote name"):
                 unc_root = line.split(None, 2)[-1].strip()
+                logger.debug(f"net use resolved {drive} -> {unc_root}")
                 return unc_root + rest
-    except Exception:
-        pass
+        logger.debug(f"net use output did not contain 'Remote name' line")
+    except Exception as e:
+        logger.debug(f"net use command failed for {drive}: {type(e).__name__}: {e}")
 
+    logger.debug(f"All drive resolution methods failed for {drive}")
     return None
 
 
@@ -76,7 +87,9 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     analyzer = AudioQualityAnalyzer()
 
     target = Path(args.target).resolve()
+    logger.debug(f"Input path: {args.target!r} -> resolved: {target}")
     if not target.is_file() and not target.is_dir():
+        logger.debug(f"Path not found locally, attempting drive letter resolution")
         # On Windows, try resolving mapped drive to UNC path
         unc = _resolve_win_drive(args.target)
         if unc:
